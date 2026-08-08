@@ -1,4 +1,144 @@
-import os
+import osimport os
+import json
+import streamlit as st
+from dotenv import load_dotenv
+from google import genai
+
+from nutrition import normalize_nutrition
+
+# ============================================================
+# LOAD ENVIRONMENT
+# ============================================================
+
+load_dotenv()
+
+# Local computer
+API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Streamlit Cloud
+if not API_KEY:
+    try:
+        API_KEY = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        API_KEY = None
+
+# ============================================================
+# CHECK API KEY
+# ============================================================
+
+if not API_KEY:
+    raise RuntimeError(
+        "GEMINI_API_KEY is missing. "
+        "Add it in Streamlit Cloud → Manage app → Settings → Secrets."
+    )
+
+# ============================================================
+# GEMINI
+# ============================================================
+
+client = genai.Client(api_key=API_KEY)
+
+MODEL_NAME = "gemini-2.5-flash"
+
+
+# ============================================================
+# NUTRITION ANALYSIS
+# ============================================================
+
+def analyze_nutrition(recipe):
+
+    recipe = str(recipe).strip()
+
+    if not recipe:
+        return normalize_nutrition({})
+
+    prompt = f"""
+You are an expert nutritionist.
+
+Analyze this food/recipe:
+
+{recipe}
+
+Assume one normal serving.
+
+Return ONLY valid JSON.
+
+Use exactly this format:
+
+{{
+  "calories": "500 kcal",
+  "protein": "25 g",
+  "carbs": "60 g",
+  "fat": "18 g",
+  "fiber": "6 g",
+  "sugar": "5 g",
+  "sodium": "700 mg",
+  "vitamins": "Vitamin A, Vitamin C, Vitamin B6",
+  "health_score": "85/100",
+  "tips": "Eat this in a balanced portion.",
+  "recommendation": "A good option when eaten in moderation.",
+  "allergens": "None"
+}}
+
+Rules:
+- Always provide every field.
+- Give realistic estimated values.
+- Health score must be between 0 and 100.
+- Do not use markdown.
+- Do not use ```json.
+- Return JSON only.
+"""
+
+    try:
+
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt
+        )
+
+        text = response.text.strip()
+
+        # Remove accidental markdown
+        if text.startswith("```"):
+            text = text.replace("```json", "")
+            text = text.replace("```", "")
+            text = text.strip()
+
+        data = json.loads(text)
+
+        return normalize_nutrition(data)
+
+    except Exception as e:
+
+        # IMPORTANT:
+        # Show the real error instead of silently showing N/A
+        return normalize_nutrition({
+            "recommendation": f"AI Error: {str(e)}"
+        })
+
+
+# ============================================================
+# COMPATIBILITY FUNCTION
+# ============================================================
+
+def get_recipe_response(recipe):
+
+    nutrition = analyze_nutrition(recipe)
+
+    return (
+        f"Calories: {nutrition['calories']}\n"
+        f"Protein: {nutrition['protein']}\n"
+        f"Carbs: {nutrition['carbs']}\n"
+        f"Fat: {nutrition['fat']}\n"
+        f"Fiber: {nutrition['fiber']}\n"
+        f"Sugar: {nutrition['sugar']}\n"
+        f"Sodium: {nutrition['sodium']}\n"
+        f"Vitamins: {nutrition['vitamins']}\n"
+        f"Health Score: {nutrition['health_score']}\n"
+        f"Health Tips: {nutrition['tips']}\n"
+        f"Recommendation: {nutrition['recommendation']}\n"
+        f"Allergens: {nutrition['allergens']}"
+    )
 import json
 import streamlit as st
 from dotenv import load_dotenv
